@@ -12,7 +12,8 @@ const extract = (index) => {
 };
 
 for (i in data) {
-  console.log(data[i].name);
+  let total = ++data[i].point;
+  console.log(total);
 }
 
 const format = (obj) => {
