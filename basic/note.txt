@@ -1,0 +1,1026 @@
+course/create
+
+    static async certificate(payload) {
+      const [certificate] = await knex
+        .from("certificate as c")
+        .select("c.*")
+        .where("c.relation_id", payload.course_id)
+        .where("c.user_id", payload.user_id)
+        .where("c.type", 2) // type 2 course
+        .where("c.status_enum", "publish");
+
+      let data = null;
+      if (certificate) {
+        data = certificate;
+      } else {
+        try {
+          const [course] = await knex
+            .from("course as w")
+            .where("id", payload.course_id);
+          if (!course) {
+            return {error: "Course not exist"};
+          }
+          if (course && !course.certificate_template_id) {
+            return {
+              error: "Certificate template not exit, please update data course",
+            };
+          }
+
+          const [template] = await knex
+            .from("certificate_template as c")
+            .select("c.*")
+            .where("c.type", 2) // type 2 template = course
+            .where("id", course.certificate_template_id);
+
+          if (!template) {
+            return {
+              error: "Certificate template not exit, please check your data",
+            };
+          }
+
+          const [user] = await knex
+            .from("users")
+            .select("users.*")
+            .where("id", payload.user_id);
+
+          const [last] = await knex
+            .from("certificate as c")
+            .select("c.id")
+            .where("c.type", 2)
+            .where("c.status_enum", "publish")
+            .orderBy("c.id", "desc");
+
+          const number = `No. C.TEL D-${
+            last ? await this.addZero(last.id, 7) : "0000001"
+          }${template.codex_back}`;
+
+          const path = Path.join(
+            __dirname,
+            `../../../utility/mail_template/${template.template_file}`
+          );
+
+          if (Fs.existsSync(path)) {
+            const name =
+              `${template.title}`.split(" ").join("_") + `_${user.id}`;
+            const today = new Date();
+            let date = moment(today).format("DD MMMM YYYY");
+
+            const res = await this.createAndUploadCertificate(
+              path,
+              {template, user, number, date},
+              name
+            );
+            if (res.error) {
+              return {error: res.error};
+            }
+
+            const now = new Date().toISOString();
+            const forsave = {
+              type: 2, // for course
+              // theme_id: template.id,
+              certificate_template_id: course.certificate_template_id,
+              codex: number,
+              relation_id: payload.course_id,
+              user_id: user.id,
+              certified_at: now,
+              created_at: now,
+              updated_at: now,
+              status_enum: "publish",
+              image_url: "-",
+              file_url: res.url,
+              // title: template.title,
+              // caption: template.title,
+            };
+
+            data = await knex("certificate")
+              .returning(["id", ...Object.keys(forsave)])
+              .insert(forsave);
+          } else {
+            return {error: "Template pdf not exist"};
+          }
+        } catch (error) {
+          return {error};
+        }
+      }
+      return {data};
+    }
+
+
+course/rating/id
+
+
+        static async rating(id, data) {
+      try {
+        const datas = await knex
+          .from("course_response as r")
+          .select(
+            "r.user_id",
+            "r.rating_at",
+            "r.rating",
+            "r.rating_title",
+            "r.rating_notes",
+            "u.username",
+            "u.full_name",
+            "u.picture",
+            "u.company_name",
+            "u.divisi_name",
+            "u.posisi",
+            "u.nik"
+          )
+          .where("r.course_id", id)
+          // .where("r.is_rating", true)
+          .leftJoin("users as u", "u.id", "r.user_id")
+          .orderBy("r.rating_at", "desc");
+        if (!datas.length) {
+          return {error: "Data not found"};
+        } else {
+          var result = null;
+          var me = datas.find(function (e) {
+            if (e.user_id == data.user_id) {
+              return e;
+            } else {
+              return null;
+            }
+          });
+          var count_1 = 0;
+          var count_2 = 0;
+          var count_3 = 0;
+          var count_4 = 0;
+          var count_5 = 0;
+          for (var i = 0; i < datas.length; i++) {
+            if (datas[i].rating == 1) {
+              count_1 = count_1 + 1;
+            }
+            if (datas[i].rating == 2) {
+              count_2 = count_2 + 1;
+            }
+            if (datas[i].rating == 3) {
+              count_3 = count_3 + 1;
+            }
+            if (datas[i].rating == 4) {
+              count_4 = count_4 + 1;
+            }
+            if (datas[i].rating == 5) {
+              count_5 = count_5 + 1;
+            }
+          }
+          var summary = [
+            {rating: 1, total: count_1},
+            {rating: 2, total: count_2},
+            {rating: 3, total: count_3},
+            {rating: 4, total: count_4},
+            {rating: 5, total: count_5},
+          ];
+          result = {
+            list: datas,
+            summary: summary,
+            me: me,
+          };
+          return result;
+        }
+      } catch (error) {
+        return {error};
+      }
+    }
+
+pathway/id
+
+    static async read(id, data) {
+      try {
+        let queryData = data;
+        var is_learner = queryData.is_learner;
+        // var user_id = queryData.user_id
+        var pathway = null;
+        var material = [];
+        var key = ">=";
+        var status = 0;
+        if (is_learner) {
+          key = "=";
+          status = 9;
+        }
+
+        let [datas] = await Pathway.query()
+          .select(
+            "classroom.*",
+            "u.username as updater_username",
+            "u.full_name as updater_fullname",
+            "c.username as creator_username",
+            "c.full_name as creator_fullname",
+            "o.username as owner_username",
+            "o.full_name as owner_fullname",
+            "o.picture as owner_avatar",
+            "o.company_name as owner_company",
+            "o.divisi_name as owner_division",
+            "o.posisi as owner_position",
+            "classroom.view_count",
+            "b.start_at",
+            "b.end_at",
+            "b.id as batch_id",
+            "b.batchs as batch",
+            "b.max_user as batch_maxuser",
+            "b.title as batch_title",
+            "b.start_at",
+            "b.end_at",
+            "mc.title as category"
+          )
+          .skipUndefined()
+          .where("classroom.id", id)
+          .where("classroom.status", key, status)
+          .where("b.status", key, status)
+          .leftJoin("classroom_batch as b", "classroom.id", "b.classroom_id")
+          .leftJoin("users as o", "classroom.owner_id", "o.id")
+          .leftJoin("users as u", "classroom.updated_by", "u.id")
+          .leftJoin("users as c", "classroom.created_by", "c.id")
+          .leftJoin("mst_category as mc", "classroom.category_id", "mc.id")
+          .leftJoin("mst_status as s", "classroom.status", "s.id")
+          .leftJoin("mst_status as p", "classroom.privacy", "p.id");
+
+        if (queryData.user_id) {
+          [datas] = await Pathway.query()
+            .select(
+              "classroom.*",
+              "b.id as batch_id",
+              "u.username as updater_username",
+              "u.full_name as updater_fullname",
+              "c.username as creator_username",
+              "c.full_name as creator_fullname",
+              "o.username as owner_username",
+              "o.full_name as owner_fullname",
+              "o.picture as owner_avatar",
+              "o.company_name as owner_company",
+              "o.divisi_name as owner_division",
+              "o.posisi as owner_position",
+              "classroom.view_count",
+              "b.start_at",
+              "b.end_at",
+              "b.id as batch_id",
+              "b.batchs as batch",
+              "b.max_user as batch_maxuser",
+              "b.title as batch_title",
+              "b.start_at",
+              "b.end_at",
+              "mc.title as category",
+              knex.raw(`
+                CASE
+                  WHEN bookmark.user_id is null THEN false
+                  WHEN bookmark.user_id is not null THEN true
+                END bookmark`)
+            )
+            .skipUndefined()
+            .where("classroom.id", id)
+            .where("classroom.status", key, status)
+            .where("b.status", key, status)
+            .leftJoin("classroom_batch as b", "classroom.id", "b.classroom_id")
+            .leftJoin("users as o", "classroom.owner_id", "o.id")
+            .leftJoin("users as u", "classroom.updated_by", "u.id")
+            .leftJoin("users as c", "classroom.created_by", "c.id")
+            .leftJoin("mst_category as mc", "classroom.category_id", "mc.id")
+            .leftJoin("mst_status as s", "classroom.status", "s.id")
+            .leftJoin("mst_status as p", "classroom.privacy", "p.id")
+            .leftJoin("classroom_bookmarks AS bookmark", function () {
+              this.on("bookmark.classroom_id", "=", "classroom.id").andOn(
+                "bookmark.user_id",
+                "=",
+                queryData.user_id
+              );
+            });
+        }
+
+        if (!datas) {
+          return {error: "Pathway not found"};
+        } else {
+          var parents = [];
+          var childs = [];
+          var userData = null;
+          var materials = isNull;
+
+          //get flow / sequence of classroom / pathway
+          if (data.is_learner) {
+            const [roles] = await knex
+              .from("classroom_user_mapping as m")
+              .select("s.slug", "s.group")
+              .where("m.classroom_id", id)
+              .where("m.user_id", queryData.user_id)
+              .where("m.batch_id", datas.batch_id)
+              .leftJoin("classroom_settings as s", "s.id", "m.settings_id");
+            if (roles) {
+              datas.roles = roles.slug;
+              if (roles.slug != "student") {
+                datas.is_admin = true;
+              }
+              if (roles.slug != "facilitator") {
+                datas.is_facilitator = true;
+              }
+            }
+
+            if (datas.is_queue) {
+              materials = await knex.raw(`
+							SELECT
+							a.flow_id, a.parent_id, a.title,
+							a.description, a.relation_id, a.target,
+							a.points, a.view_time, a.image,
+							a.sort_order, a.section, a.url,
+							a.start_at, a.end_at
+							FROM
+							(	
+								SELECT 
+								cf.id as flow_id, cf.parent_id, cf.title,
+								cf.description, cf.relation_id, cf.points as target,
+								crs.points, cf.view_time, cf.image,
+								cf.sort_order, cs.title as section, cs.group as url,
+								cf.start_at, cf.end_at
+								FROM classroom_flow cf
+								LEFT JOIN classroom_settings cs ON cs.id = cf.settings_id
+								LEFT JOIN classroom_response_student crs ON crs.flow_id = cf.id AND crs.user_id = ${queryData.user_id} AND crs.status = 9
+								WHERE cf.classroom_id = ${id} AND cf.status = 9
+								AND '2020-10-20' >= cf.start_at::date 
+								AND (cf.parent_id is null or cf.parent_id = 0)  
+
+								UNION
+
+								SELECT 
+								cf.id as flow_id, cf.parent_id, cf.title,
+								cf.description, cf.relation_id, cf.points as target,
+								crs.points, cf.view_time, cf.image,
+								cf.sort_order, cs.title as section, cs.group as url,
+								cf.start_at, cf.end_at
+								FROM classroom_flow cf
+								LEFT JOIN classroom_settings cs ON cs.id = cf.settings_id
+								LEFT JOIN classroom_response_student crs ON crs.flow_id = cf.id AND crs.user_id = ${queryData.user_id} AND crs.status = 9
+								WHERE cf.classroom_id = ${id} AND cf.status = 9
+								AND (cf.parent_id is not null or cf.parent_id <> 0)  
+							) a ORDER BY a.sort_order asc  
+							`);
+              materials = materials.rows;
+              console.log("materials baru", materials.rows);
+            } else {
+              materials = await knex
+                .from("classroom_flow as f")
+                .select(
+                  "f.id as flow_id",
+                  "f.parent_id",
+                  "f.title",
+                  "f.description",
+                  "f.relation_id",
+                  "f.points as target",
+                  "r.points",
+                  "f.view_time",
+                  "f.image",
+                  "f.sort_order",
+                  "s.title as section",
+                  "s.group as url"
+                )
+                .where("f.classroom_id", id)
+                .where("f.status", 9)
+                .leftJoin("classroom_settings as s", "f.settings_id", "s.id")
+                .leftJoin("classroom_response_student as r", function () {
+                  this.on("r.flow_id", "f.id")
+                    .andOn("r.user_id", queryData.user_id)
+                    .andOn("r.status", 9);
+                })
+                .orderBy("f.sort_order", "asc");
+            }
+          } else {
+            datas.is_admin = true;
+            console.log("datas2", datas);
+            materials = await knex
+              .from("classroom_flow as f")
+              .select(
+                "f.id as flow_id",
+                "f.parent_id",
+                "f.title",
+                "f.relation_id",
+                "f.points as target",
+                "f.view_time",
+                "f.image",
+                "f.sort_order",
+                "s.title as section",
+                "s.group as url"
+              )
+              .where("f.classroom_id", id)
+              .where("f.status", 9)
+              .leftJoin("classroom_settings as s", "f.settings_id", "s.id")
+              .orderBy("f.sort_order", "asc")
+              .orderBy("f.start_at", "asc");
+          }
+
+          if (is_learner && !datas.is_admin) {
+            const [user] = await knex
+              .from("classroom_response as r")
+              .joinRaw(
+                "LEFT JOIN ( SELECT sum(crs.points)::integer as points, crs.user_id, crs.classroom_id FROM classroom_response_student crs WHERE crs.classroom_id = " +
+                  id +
+                  " AND crs.user_id = " +
+                  queryData.user_id +
+                  " GROUP BY crs.classroom_id, crs.user_id ) b ON b.user_id = r.user_id AND b.classroom_id = r.classroom_id"
+              )
+              .where("r.classroom_id", id)
+              .where("r.user_id", parseInt(queryData.user_id));
+            // .where("r.batch_id", datas.batch_id);
+
+            if (!user) {
+              const today = new Date().toISOString();
+              const [insert] = await knex("classroom_response")
+                .insert({
+                  batch_id: parseInt(datas.batch_id),
+                  classroom_id: parseInt(id),
+                  user_id: parseInt(queryData.user_id),
+                  is_view: true,
+                  view_at: today,
+                })
+                .returning("*");
+              userData = insert;
+            } else {
+              userData = user;
+            }
+            // not unique view_count data
+            var newData = parseInt(datas.view_count) + 1;
+            await Pathway.query()
+              .where("id", parseInt(id))
+              .update({view_count: newData});
+            datas.view_count = newData;
+          }
+          materials.find(function (e) {
+            if (!e.relation_id) {
+              parents.push(e);
+            } else {
+              childs.push(e);
+            }
+          });
+          console.log("materials", materials);
+          for (var i = 0; i < parents.length; i++) {
+            var parent = parents[i];
+            var child = [];
+            var totPoin = 0;
+            for (var j = 0; j < childs.length; j++) {
+              if (childs[j].parent_id == parents[i].flow_id) {
+                if (childs[j].points) {
+                  totPoin = totPoin + childs[j].points;
+                }
+                child.push(childs[j]);
+              }
+            }
+            parent.points = totPoin;
+            var list = {
+              parent: parent,
+              child: child,
+            };
+            material.push(list);
+          }
+
+          const expertData = await knex
+            .from("classroom_user as u")
+            .select(
+              "u.classroom_id",
+              "u.batch_id",
+              "u.user_id",
+              "u.fullname",
+              "u.avatar",
+              "u.jobs",
+              "u.company",
+              "s.title",
+              "s.slug",
+              "u.sort_order"
+            )
+            .where("u.status", key, status)
+            .where("u.classroom_id", id)
+            .leftJoin("classroom_settings as s", "s.id", "u.settings_id")
+            .orderBy("u.sort_order", "asc")
+            .distinct("u.fullname");
+
+          let _status_payment = null;
+          let _transaction_detail = null;
+
+          if (datas.is_premium) {
+            _status_payment = await knex
+              .from("transaction_histories_classroom")
+              .select("*")
+              .where({
+                user_id: queryData.user_id,
+                content_id: id,
+              })
+              .whereNotIn("status", ["cancel", "expire"])
+              .first();
+          }
+
+          pathway = {
+            detail: datas,
+            material: material,
+            enroll: userData,
+            expert: expertData,
+            is_admin: datas.is_admin,
+            is_facilitator: datas.is_facilitator,
+            roles: datas.roles,
+          };
+          if (datas.is_premium && _status_payment) {
+            pathway.payments = _status_payment;
+            pathway.transaction = _transaction_detail;
+          } else if (datas.is_premium && !_status_payment) {
+            pathway.payments = null;
+            pathway.transaction = null;
+          }
+          if (datas.is_admin) {
+            pathway.enroll = {
+              is_enroll: true,
+            };
+          }
+          return pathway;
+        }
+      } catch (error) {
+        return {error};
+      }
+    }
+
+
+pathway/todo/id
+
+    static async todo(id, datas) {
+      try {
+        let queryData = datas;
+        const [user] = await knex
+          .from("classroom_user_mapping")
+          .where("classroom_id", parseInt(id))
+          .where("user_id", parseInt(queryData.user_id));
+        if (!user) {
+          return {error: "No data"};
+        } else {
+          const materials = await knex
+            .from("classroom_flow as f")
+            .select(
+              "f.id as flow_id",
+              "f.parent_id",
+              "f.title",
+              "f.relation_id",
+              "f.points as target",
+              "r.points",
+              "f.view_time",
+              "f.image",
+              "f.sort_order",
+              "s.title as section",
+              "s.group as url",
+              "f.start_at",
+              "f.end_at"
+            )
+            .where("f.classroom_id", id)
+            .whereNotNull("f.relation_id")
+            .where("f.status", 9)
+            .leftJoin("classroom_settings as s", "f.settings_id", "s.id")
+            .leftJoin("classroom_response_student as r", function () {
+              this.on("r.flow_id", "f.id")
+                .andOn("r.user_id", queryData.user_id)
+                .andOn("r.status", 9);
+            })
+            .orderBy("f.sort_order", "asc");
+
+          var next = [];
+          var past = [];
+
+          const today = new Date().toISOString();
+          materials.find(function (e) {
+            var end = null;
+            end = new Date(e.end_at).toISOString();
+            if (end > today) {
+              next.push(e);
+            } else {
+              past.push(e);
+            }
+          });
+          const [course] = await Pathway.query()
+            .select(
+              "r.classroom_id",
+              "classroom.title as title",
+              "r.user_id",
+              "u.username",
+              "u.full_name",
+              "u.picture",
+              "u.company_name",
+              "u.divisi_name",
+              "u.posisi"
+            )
+            .skipUndefined()
+            .where("classroom.id", id)
+            .where("classroom.status", 9)
+            .where("b.status", 9)
+            .leftJoin("classroom_batch as b", "classroom.id", "b.classroom_id")
+            .leftJoin("classroom_response as r", function () {
+              this.on("r.classroom_id", id).andOn(
+                "r.user_id",
+                queryData.user_id
+              );
+              // .andOn("r.batch_id", "b.id");
+            })
+            .leftJoin("users as u", function () {
+              this.on("u.id", queryData.user_id).andOn("u.id", "r.user_id");
+            });
+          var userData = {
+            user: course,
+            next: next,
+            past: past,
+          };
+          return userData;
+        }
+      } catch (error) {
+        return {error};
+      }
+    }
+
+pathway/flow_data
+
+
+    static async flow(id, user_id, data) {
+      try {
+        // user_id = 153006;
+        let queryData = data;
+        var is_learner = queryData.is_learner;
+        // var user_id = queryData.user_id
+        var pathway = null;
+        var material = [];
+        var key = ">=";
+        var status = 0;
+        if (is_learner) {
+          key = "=";
+          status = 9;
+        }
+        const [datas] = await Pathway.query()
+          .select(
+            "classroom.id",
+            "b.id as batch_id",
+            "classroom.title",
+            "classroom.points",
+            "classroom.is_queue"
+          )
+          .skipUndefined()
+          .where("classroom.id", id)
+          .where("classroom.status", key, status)
+          .where("b.status", key, status)
+          .leftJoin("classroom_batch as b", "classroom.id", "b.classroom_id");
+        if (!datas) {
+          return {error: "Pathway not found"};
+        } else {
+          var base_point = parseInt(datas.points);
+          var total_point = 0;
+          var parents = [];
+          var childs = [];
+          var userData = null;
+          datas.is_admin = false;
+          datas.is_admin_type = null;
+          datas.total_point = 0;
+          //get flow / sequence of classroom / pathway
+          if (is_learner) {
+            const [roles] = await knex
+              .from("classroom_user_mapping as m")
+              .select(
+                "s.slug",
+                "s.group",
+                "r.points as total_points",
+                "r.is_enroll",
+                "r.user_id"
+              )
+              .where("m.classroom_id", id)
+              .where("m.user_id", user_id)
+              .where("m.batch_id", datas.batch_id)
+              .leftJoin("classroom_settings as s", "s.id", "m.settings_id")
+              .leftJoin("classroom_response as r", function () {
+                this.on("r.classroom_id", "m.classroom_id")
+                  // .andOn("m.batch_id", "r.batch_id")
+                  .andOn("r.user_id", parseInt(user_id));
+              });
+            console.log("roles", roles);
+            if (roles) {
+              datas.is_admin_type = roles.slug;
+              if (roles.slug != "student") {
+                datas.is_admin = true;
+              } else {
+                if (roles.total_points) {
+                  total_point = parseInt(roles.total_points);
+                  datas.total_point = parseInt(total_point);
+                }
+                console.log("total point 2", datas.total_point);
+              }
+            }
+          }
+
+          if (!datas.is_admin) {
+            if (parseInt(queryData.flow_id)) {
+              const [flow] = await this.getFlow(id, user_id, queryData.flow_id);
+
+              if (flow) {
+                if (!flow.response_id) {
+                  var [respon] = await knex
+                    .from("classroom_response_student")
+                    .insert({
+                      classroom_id: parseInt(id),
+                      flow_id: parseInt(queryData.flow_id),
+                      user_id: parseInt(user_id),
+                      targets: parseInt(flow.target),
+                      taken: 1,
+                      status: 9,
+                    })
+                    .returning("*");
+                  // console.log(respon)
+                  if (respon.id) {
+                    flow.response_id = respon.id;
+                  }
+                }
+                var response_id = flow.response_id;
+                var poin = 0;
+                var oldPoin = parseInt(flow.points);
+                var totPoin = parseInt(datas.total_point);
+                var type = flow.url.replace("pathway/", "");
+                var act = false;
+                var actCourse = false;
+                // console.log(type);
+                switch (type) {
+                  case "assesment":
+                    var [detail] = await knex
+                      .from("classroom_response_assesment")
+                      .where("classroom_id", parseInt(id))
+                      .where("user_id", parseInt(user_id))
+                      .where("content_id", parseInt(flow.relation_id));
+                    if (detail) {
+                      poin = parseInt(flow.target);
+                      act = true;
+                    }
+                    break;
+                  case "mentoring":
+                    var event = [];
+                    if (flow.is_task) {
+                      event = await knex
+                        .from("classroom_task as t")
+                        .where("t.classroom_id", parseInt(id))
+                        .where("t.batch_id", parseInt(datas.batch_id))
+                        .where("t.user_id", parseInt(user_id))
+                        .where("f.relation_id", parseInt(flow.detail_id))
+                        .join("classroom_flow as f", "f.id", "t.flow_id");
+                    } else {
+                      event = await knex
+                        .from("classroom_event_mapping as m")
+                        .select("m.user_id")
+                        .where("e.settings_id", 15)
+                        .where("m.classroom_id", parseInt(id))
+                        .where("m.batch_id", parseInt(datas.batch_id))
+                        .where("m.user_id", parseInt(user_id))
+                        .leftJoin("classroom_event as e", "m.event_id", "e.id");
+                    }
+                    // console.log(event)
+                    if (event.length) {
+                      act = true;
+                      poin = parseInt(flow.target);
+                    }
+                    break;
+                  case "coaching":
+                    var [events] = await knex
+                      .from("classroom_event_mapping as m")
+                      .select("m.user_id")
+                      .where("e.settings_id", 14)
+                      .where("m.classroom_id", parseInt(id))
+                      .where("m.batch_id", parseInt(datas.batch_id))
+                      .where("m.user_id", parseInt(user_id))
+                      .leftJoin("classroom_event as e", "m.event_id", "e.id");
+                    if (events) {
+                      act = true;
+                      poin = parseInt(flow.target);
+                    }
+                    break;
+                  case "course":
+                    var course = await knex
+                      .from("course_flow as f")
+                      .select(
+                        "f.id as flow_id",
+                        "f.sort_order",
+                        "f.relation_id",
+                        "r.id",
+                        "r.user_id",
+                        "r.start_at",
+                        "r.finished_at",
+                        "r.points",
+                        "r.targets"
+                      )
+                      .where("f.course_id", parseInt(flow.relation_id))
+                      .where("f.status", 9)
+                      .whereNotNull("f.relation_id")
+                      .leftJoin("course_response_student as r", function () {
+                        this.on("r.flow_id", "f.id").andOn(
+                          "r.user_id",
+                          parseInt(user_id)
+                        );
+                      })
+                      .orderBy("f.sort_order", "asc");
+                    if (course.length) {
+                      var j = 0;
+                      var coursePoin = 0;
+                      for (var i = 0; i < course.length; i++) {
+                        if (course[i].finished_at) {
+                          j = j + 1;
+                          // coursePoin disini digunakan untuk setting points yang didapatkan di pathway
+                          // Bukan berdasarkan points pada flow_id, tapi berdasarkan target
+
+                          coursePoin =
+                            parseInt(coursePoin) + parseInt(course[i].targets);
+                        }
+                      }
+                      if (j) {
+                        act = true;
+                        var totCourse = parseInt(course.length);
+                        poin = coursePoin;
+                        if (j == totCourse) {
+                          actCourse = true;
+                        }
+                      }
+                    }
+                    break;
+                  case "event":
+                    break;
+                  default:
+                    var types = ["media", "podcast", "video", "content"];
+                    var checkType = types.includes(type);
+                    if (checkType) {
+                      if (flow.is_task) {
+                        const task = await knex
+                          .from("classroom_task")
+                          .where("classroom_id", parseInt(id))
+                          .where("batch_id", parseInt(datas.batch_id))
+                          .where("user_id", parseInt(user_id))
+                          .where("flow_id", parseInt(queryData.flow_id));
+                        if (task.length) {
+                          //if(!flow.points){
+                          poin = parseInt(flow.target);
+                          act = true;
+                          // }
+                        }
+                      } else {
+                        if (!flow.points) {
+                          poin = parseInt(flow.target);
+                          act = true;
+                        }
+                      }
+                    }
+                    break;
+                }
+                if (!oldPoin) {
+                  oldPoin = 0;
+                }
+
+                if (poin) {
+                  var today = new Date().toISOString();
+                  if (type == "course") {
+                    if (!actCourse) {
+                      today = null;
+                    }
+                  }
+                  await knex
+                    .from("classroom_response_student")
+                    .where("id", response_id)
+                    .update({
+                      points: parseInt(poin),
+                      finished_at: today,
+                    });
+                  if (oldPoin != poin) {
+                    if (act) {
+                      var newPoin = totPoin;
+                      if (!flow.finished_at) {
+                        newPoin =
+                          parseInt(totPoin) -
+                          parseInt(oldPoin) +
+                          parseInt(poin);
+                      }
+                      if (newPoin) {
+                        if (newPoin > base_point) {
+                          newPoin = base_point;
+                        }
+                        var [newData] = await knex
+                          .from("classroom_response")
+                          .where({
+                            classroom_id: parseInt(id),
+                            user_id: parseInt(user_id),
+                            // batch_id: parseInt(datas.batch_id),
+                          })
+                          .update({
+                            points: newPoin,
+                            updated_at: today,
+                          })
+                          .returning("*");
+                        datas.total_point = newData.points;
+
+                        console.log("total point 3", datas.total_point);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          console.log("is_queue", datas.is_queue);
+          console.log("is_learner", is_learner);
+          let materials = {};
+          if (datas.is_queue) {
+            materials = await knex.raw(`
+						SELECT
+							a.flow_id, a.parent_id, a.title, a.description,
+							a.relation_id, a.target, a.is_task, a.show_comment,
+							a.set_point_view, a.set_point_task, a.set_point_comment, a.points,
+							a.response_id, a.start_at, a.finished_at, a.detail_id,
+							a.view_time, a.image, a.sort_order, a.section, a.url,
+							a.user_id, a.settings_id, a.settings_slug, a.settings_title
+						FROM
+						(
+							SELECT 
+							cf.id as flow_id, cf.parent_id, cf.title, cf.description,
+							cf.relation_id, cf.points as target, cf.is_task, cf.show_comment,
+							cf.set_point_view, cf.set_point_task, cf.set_point_comment, crs.points,
+							crs.id as response_id, crs.start_at, crs.finished_at, cf.detail_id,
+							cf.view_time, cf.image, cf.sort_order, cs.title as section, cs.group as url,
+							crs.user_id, cf.settings_id, cs.slug as settings_slug, cs.title as settings_title
+							FROM 
+							classroom_flow cf
+							LEFT JOIN classroom_settings cs ON cs.id = cf.settings_id
+							LEFT JOIN classroom_response_student crs ON crs.flow_id = cf.id AND crs.user_id = ${user_id} AND crs.status = 9
+							WHERE cf.classroom_id = ${id} AND cf.status = 9 AND cf.deleted = FALSE
+							AND now() >= cf.start_at::date 
+							AND (cf.parent_id is null or cf.parent_id = 0) 
+
+							UNION
+
+							SELECT 
+							cf.id as flow_id, cf.parent_id, cf.title, cf.description,
+							cf.relation_id, cf.points as target, cf.is_task, cf.show_comment,
+							cf.set_point_view, cf.set_point_task, cf.set_point_comment, crs.points,
+							crs.id as response_id, crs.start_at, crs.finished_at, cf.detail_id,
+							cf.view_time, cf.image, cf.sort_order, cs.title as section, cs.group as url,
+							crs.user_id, cf.settings_id, cs.slug as settings_slug, cs.title as settings_title
+							FROM 
+							classroom_flow cf
+							LEFT JOIN classroom_settings cs ON cs.id = cf.settings_id
+							LEFT JOIN classroom_response_student crs ON crs.flow_id = cf.id AND crs.user_id = ${user_id} AND crs.status = 9
+							WHERE cf.classroom_id = ${id} AND cf.status = 9 AND cf.deleted = FALSE
+							AND (cf.parent_id is not null or cf.parent_id <> 0) 
+						) a ORDER BY a.sort_order ASC`);
+            materials = materials.rows;
+            console.log(" masuk materials is queque true");
+          } else {
+            materials = await this.getFlow(id, user_id, null);
+          }
+
+          if (is_learner && !datas.is_admin) {
+            const [user] = await knex
+              .from("classroom_response as r")
+              .where("r.classroom_id", id)
+              .where("r.user_id", parseInt(user_id));
+            // .where("r.batch_id", datas.batch_id);
+            if (user) {
+              userData = user;
+            }
+          }
+          materials.find(function (e) {
+            if (!e.relation_id) {
+              parents.push(e);
+            } else {
+              childs.push(e);
+            }
+          });
+
+          for (var i = 0; i < parents.length; i++) {
+            var parent = parents[i];
+            var child = [];
+            var totPoin = 0;
+            for (var j = 0; j < childs.length; j++) {
+              if (childs[j].parent_id == parents[i].flow_id) {
+                if (childs[j].points) {
+                  totPoin = parseInt(totPoin) + parseInt(childs[j].points);
+                }
+                childs[j].is_active = false;
+                if (parseInt(childs[j].points)) {
+                  childs[j].is_active = true;
+                }
+                // Desimal to integer
+                childs[j].points = parseInt(childs[j].points);
+                child.push(childs[j]);
+              }
+            }
+            parent.points = parseInt(totPoin);
+            var list = {
+              parent: parent,
+              child: child,
+            };
+            material.push(list);
+          }
+
+          pathway = {
+            detail: datas,
+            flow: material,
+            enroll: userData,
+            is_admin: datas.is_admin,
+            is_admin_type: datas.is_admin_type,
+          };
+          if (datas.is_admin) {
+            pathway.enroll = {
+              is_enroll: true,
+            };
+          }
+          return pathway;
+        }
+      } catch (error) {
+        return {error};
+      }
+    }
